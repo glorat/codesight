@@ -611,15 +611,12 @@ async function detectTRPCRoutes(
     // Regex fallback
     const lines = content.split("\n");
     for (const line of lines) {
-      const queryMatch = line.match(/^\s*(\w+)\s*:\s*.*\.(query)\s*\(/);
-      const mutationMatch = line.match(/^\s*(\w+)\s*:\s*.*\.(mutation)\s*\(/);
-      const m = queryMatch || mutationMatch;
+      const m = line.match(/^\s*(\w+)\s*:\s*.*\.(?:query|mutation|subscription)\s*\(/);
       if (m) {
         const procName = m[1];
-        const isQuery = m[2] === "query";
         if (!routes.some((r) => r.path === procName && r.file === rel)) {
           routes.push({
-            method: isQuery ? "QUERY" : "MUTATION",
+            method: "PROCEDURE",
             path: procName,
             file: rel,
             tags,
@@ -631,7 +628,15 @@ async function detectTRPCRoutes(
     }
   }
 
-  return routes;
+  // Deduplicate: prefer AST confidence over regex for the same path
+  const seen = new Map<string, RouteInfo>();
+  for (const route of routes) {
+    const existing = seen.get(route.path);
+    if (!existing || (existing.confidence === "regex" && route.confidence === "ast")) {
+      seen.set(route.path, route);
+    }
+  }
+  return [...seen.values()];
 }
 
 // --- SvelteKit ---

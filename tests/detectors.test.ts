@@ -155,8 +155,39 @@ export const userRouter = createTRPCRouter({
     const files = await mods.collectFiles(dir);
     const routes = await mods.detectRoutes(files, project);
     assert.ok(routes.length >= 3, `Expected >= 3 tRPC procedures, got ${routes.length}`);
-    assert.ok(routes.some((r: any) => r.path === "list" && r.method === "QUERY"));
-    assert.ok(routes.some((r: any) => r.path === "create" && r.method === "MUTATION"));
+    assert.ok(routes.some((r: any) => r.path === "list" && r.method === "PROCEDURE"));
+    assert.ok(routes.some((r: any) => r.path === "create" && r.method === "PROCEDURE"));
+  });
+
+  it("detects tRPC procedures imported from separate files", async () => {
+    const dir = await writeFixture("trpc-imported", {
+      "package.json": JSON.stringify({ name: "test", dependencies: { "@trpc/server": "^10.0.0" } }),
+      "src/trpc.ts": `export const publicProcedure = {} as any;\nexport const router = {} as any;`,
+      "src/procedures/getUsers.ts": `import { publicProcedure } from "../trpc";
+export const getUsers = publicProcedure.query(async () => []);`,
+      "src/procedures/createUser.ts": `import { publicProcedure } from "../trpc";
+export const createUser = publicProcedure.input(z.object({ name: z.string() })).mutation(async ({ input }) => ({}));`,
+      "src/procedures/onUpdate.ts": `import { publicProcedure } from "../trpc";
+export const onUpdate = publicProcedure.subscription(async () => {});`,
+      "src/router.ts": `import { router, publicProcedure } from "./trpc";
+import { getUsers } from "./procedures/getUsers";
+import { createUser } from "./procedures/createUser";
+import { onUpdate } from "./procedures/onUpdate";
+export const appRouter = router({
+  getUsers,
+  createUser,
+  onUpdate,
+  inline: publicProcedure.query(async () => "ok"),
+});`,
+    });
+    const project = await mods.detectProject(dir);
+    const files = await mods.collectFiles(dir);
+    const routes = await mods.detectRoutes(files, project);
+    assert.ok(routes.length >= 4, `Expected >= 4 tRPC procedures, got ${routes.length}`);
+    assert.ok(routes.some((r: any) => r.path === "getUsers" && r.method === "PROCEDURE"), "getUsers should be PROCEDURE");
+    assert.ok(routes.some((r: any) => r.path === "createUser" && r.method === "PROCEDURE"), "createUser should be PROCEDURE");
+    assert.ok(routes.some((r: any) => r.path === "onUpdate" && r.method === "PROCEDURE"), "onUpdate should be PROCEDURE");
+    assert.ok(routes.some((r: any) => r.path === "inline" && r.method === "PROCEDURE"), "inline should be PROCEDURE");
   });
 
   it("detects SvelteKit routes", async () => {

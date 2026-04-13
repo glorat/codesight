@@ -360,16 +360,14 @@ function extractTRPCRoutes(
     return false;
   }
 
-  function findProcedureMethod(node: any): string | null {
-    if (!node || node.kind !== SK.CallExpression) return null;
+  function isProcedureChain(node: any): boolean {
+    if (!node || node.kind !== SK.CallExpression) return false;
     const expr = node.expression;
     if (expr?.kind === SK.PropertyAccessExpression) {
       const name = getText(sf, expr.name);
-      if (name === "query") return "QUERY";
-      if (name === "mutation") return "MUTATION";
-      if (name === "subscription") return "SUBSCRIPTION";
+      return name === "query" || name === "mutation" || name === "subscription";
     }
-    return null;
+    return false;
   }
 
   function extractFromRouter(node: any, prefix: string) {
@@ -379,6 +377,22 @@ function extractTRPCRoutes(
     if (arg.kind !== SK.ObjectLiteralExpression) return;
 
     for (const prop of arg.properties || []) {
+      // ShorthandPropertyAssignment: e.g. `router({ updateWorkspace })` — imported procedure
+      if (prop.kind === SK.ShorthandPropertyAssignment) {
+        const name = prop.name ? getText(sf, prop.name) : "";
+        if (name) {
+          routes.push({
+            method: "PROCEDURE",
+            path: prefix ? `${prefix}.${name}` : name,
+            file: filePath,
+            tags,
+            framework: "trpc",
+            confidence: "ast",
+          });
+        }
+        continue;
+      }
+
       if (prop.kind === SK.PropertyAssignment) {
         const name = prop.name ? getText(sf, prop.name) : "";
         if (!name) continue;
@@ -390,11 +404,10 @@ function extractTRPCRoutes(
           continue;
         }
 
-        // Procedure: look for .query() / .mutation() / .subscription()
-        const method = findProcedureMethod(init);
-        if (method) {
+        // Procedure chain: .query() / .mutation() / .subscription()
+        if (isProcedureChain(init)) {
           routes.push({
-            method,
+            method: "PROCEDURE",
             path: prefix ? `${prefix}.${name}` : name,
             file: filePath,
             tags,
@@ -404,11 +417,67 @@ function extractTRPCRoutes(
           continue;
         }
 
-        // Could be a reference to another router variable — can't resolve without types
+        // Nested namespace object: e.g. `agent: { bundleCreation: bundleCreationRouter }`
+        if (init.kind === SK.ObjectLiteralExpression) {
+          extractFromObjectLiteral(init, prefix ? `${prefix}.${name}` : name);
+          continue;
+        }
+
+        // Identifier reference — imported procedure or router variable
+        if (init.kind === SK.Identifier) {
+          routes.push({
+            method: "PROCEDURE",
+            path: prefix ? `${prefix}.${name}` : name,
+            file: filePath,
+            tags,
+            framework: "trpc",
+            confidence: "ast",
+          });
+          continue;
+        }
       }
 
       if (prop.kind === SK.SpreadAssignment) {
         // ...otherRoutes — can't resolve statically
+      }
+    }
+  }
+
+  // Walk a plain object literal used for namespace grouping (not a router() call)
+  function extractFromObjectLiteral(node: any, prefix: string) {
+    for (const prop of node.properties || []) {
+      if (prop.kind === SK.ShorthandPropertyAssignment) {
+        const name = prop.name ? getText(sf, prop.name) : "";
+        if (name) {
+          routes.push({
+            method: "PROCEDURE",
+            path: prefix ? `${prefix}.${name}` : name,
+            file: filePath,
+            tags,
+            framework: "trpc",
+            confidence: "ast",
+          });
+        }
+        continue;
+      }
+      if (prop.kind === SK.PropertyAssignment) {
+        const name = prop.name ? getText(sf, prop.name) : "";
+        if (!name) continue;
+        const init = prop.initializer;
+        if (isRouterCall(init)) {
+          extractFromRouter(init, prefix ? `${prefix}.${name}` : name);
+        } else if (init.kind === SK.ObjectLiteralExpression) {
+          extractFromObjectLiteral(init, prefix ? `${prefix}.${name}` : name);
+        } else {
+          routes.push({
+            method: "PROCEDURE",
+            path: prefix ? `${prefix}.${name}` : name,
+            file: filePath,
+            tags,
+            framework: "trpc",
+            confidence: "ast",
+          });
+        }
       }
     }
   }

@@ -79,11 +79,12 @@ function formatRoutes(result: ScanResult): string {
   const lines: string[] = ["# Routes", ""];
 
   // Separate HTTP routes from special protocols
+  const trpcRoutes = result.routes.filter((r) => r.framework === "trpc");
   const httpRoutes = result.routes.filter(
-    (r) => !["QUERY", "MUTATION", "SUBSCRIPTION", "RPC", "WS", "WS-ROOM"].includes(r.method)
+    (r) => r.framework !== "trpc" && !["QUERY", "MUTATION", "SUBSCRIPTION", "RPC", "WS", "WS-ROOM"].includes(r.method)
   );
   const graphqlRoutes = result.routes.filter((r) =>
-    ["QUERY", "MUTATION", "SUBSCRIPTION"].includes(r.method)
+    r.framework !== "trpc" && ["QUERY", "MUTATION", "SUBSCRIPTION"].includes(r.method)
   );
   const grpcRoutes = result.routes.filter((r) => r.method === "RPC");
   const wsRoutes = result.routes.filter((r) => r.method === "WS" || r.method === "WS-ROOM");
@@ -167,6 +168,15 @@ function formatRoutes(result: ScanResult): string {
       }
       lines.push("");
     }
+  }
+
+  // tRPC procedures
+  if (trpcRoutes.length > 0) {
+    lines.push("## tRPC Procedures", "");
+    for (const r of trpcRoutes) {
+      lines.push(`- \`${r.path}\``);
+    }
+    lines.push("");
   }
 
   // gRPC
@@ -386,9 +396,10 @@ function formatCombined(
   // Token stats
   const ts = result.tokenStats;
   const httpRouteCount = result.routes.filter(
-    (r) => !["QUERY", "MUTATION", "SUBSCRIPTION", "RPC", "WS", "WS-ROOM"].includes(r.method)
+    (r) => r.framework !== "trpc" && !["QUERY", "MUTATION", "SUBSCRIPTION", "RPC", "WS", "WS-ROOM"].includes(r.method)
   ).length;
-  const gqlCount = result.routes.filter((r) => ["QUERY", "MUTATION", "SUBSCRIPTION"].includes(r.method)).length;
+  const gqlCount = result.routes.filter((r) => r.framework !== "trpc" && ["QUERY", "MUTATION", "SUBSCRIPTION"].includes(r.method)).length;
+  const trpcCount = result.routes.filter((r) => r.framework === "trpc").length;
   const wsCount = result.routes.filter((r) => r.method === "WS" || r.method === "WS-ROOM").length;
   const grpcCount = result.routes.filter((r) => r.method === "RPC").length;
   const eventCount = result.events?.length ?? 0;
@@ -398,6 +409,7 @@ function formatCombined(
   const inferredNote = inferredCount > 0 ? ` (${inferredCount} inferred)` : "";
   let routeStr = `${httpRouteCount} routes${inferredNote}`;
   if (gqlCount > 0) routeStr += ` + ${gqlCount} graphql`;
+  if (trpcCount > 0) routeStr += ` + ${trpcCount} trpc`;
   if (grpcCount > 0) routeStr += ` + ${grpcCount} rpc`;
   if (wsCount > 0) routeStr += ` + ${wsCount} ws`;
 
@@ -522,7 +534,7 @@ function formatCoverage(result: ScanResult): string {
  */
 export function computeCrudGroups(routes: ScanResult["routes"]): import("./types.js").CrudGroup[] {
   const httpRoutes = routes.filter(
-    (r) => !["QUERY", "MUTATION", "SUBSCRIPTION", "RPC", "WS", "WS-ROOM"].includes(r.method)
+    (r) => r.framework !== "trpc" && !["QUERY", "MUTATION", "SUBSCRIPTION", "RPC", "WS", "WS-ROOM"].includes(r.method)
   );
 
   // Group by base resource — strip trailing :id or :param
